@@ -11,6 +11,8 @@ from ui.pages.dashboard import DashboardPage
 from ui.pages.placeholder import PlaceholderPage
 from ui.pages.brokers import BrokersPage
 from ui.pages.engine_page import EnginePage
+from ui.pages.execution import ExecutionPage
+from ui.pages.targets import TargetsPage
 
 NAV = [("Dashboard", "\u25f0"), ("Condition Bank", "\u25c8"),
        ("Strategy Builder", "\u2699"), ("Brokers", "\u26a1"),
@@ -86,6 +88,10 @@ class Shell(ctk.CTk):
             return BrokersPage(self.area, self)
         if name == "Engine":
             return EnginePage(self.area, self)
+        if name == "Execution":
+            return ExecutionPage(self.area, self)
+        if name == "Targets":
+            return TargetsPage(self.area, self)
         return PlaceholderPage(self.area, self, name)
 
     def show(self, name):

@@ -18,6 +18,24 @@ from datetime import datetime
 from . import conditions as C
 from . import expression as E
 
+# Suggested starting values from the specification. Every one of them is a
+# user input -- these are only what a new strategy begins with.
+TRAILING_DEFAULT = [(7.0, -5.0), (10.0, 0.0), (15.0, 5.0), (20.0, 10.0),
+                    (25.0, 15.0), (30.0, 20.0), (35.0, 25.0), (40.0, 30.0),
+                    (45.0, 35.0), (50.0, 40.0)]
+PROFIT_LOCK_DEFAULT = [(10000, 5000), (20000, 10000), (30000, 20000),
+                       (40000, 30000), (50000, 40000), (60000, 50000),
+                       (70000, 60000), (80000, 70000), (90000, 80000),
+                       (100000, 100000)]
+
+
+def _levels(pairs):
+    return [{"on": False, "at": float(a), "lock": float(b)} for a, b in pairs]
+
+
+def _ladder():
+    return [{"on": False, "rate": 0.0, "qty": 0.0} for _ in range(4)]
+
 
 def app_dir() -> str:
     """Folder next to the EXE when frozen, else the project folder."""
@@ -55,6 +73,25 @@ class Strategy:
     entry_to: str = "15:00"
     square_off_time: str = "15:10"
     strike_filter: dict = field(default_factory=dict)
+
+    # targets and stop-losses: four rows each, rate % and quantity %
+    targets: list = field(default_factory=_ladder)
+    stops: list = field(default_factory=_ladder)
+
+    # trailing lock profit, per position, ten levels
+    trailing_on: bool = False
+    trailing: list = field(default_factory=lambda: _levels(TRAILING_DEFAULT))
+
+    # profit lock for this strategy, ten levels, in rupees
+    profit_lock_on: bool = False
+    profit_locks: list = field(
+        default_factory=lambda: _levels(PROFIT_LOCK_DEFAULT))
+
+    # day limits for this strategy, in rupees
+    day_profit_on: bool = False
+    day_profit: float = 0.0
+    day_loss_on: bool = False
+    day_loss: float = 0.0
 
     def summary(self):
         ok_e, _ = E.validate(self.entry, "entry")

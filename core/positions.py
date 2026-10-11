@@ -58,6 +58,8 @@ class Position:
     note: str = ""
     entry_charges: float = 0.0     # already paid on the buy leg
     exit_charges: float = 0.0      # paid so far on exits
+    levels_hit: list = field(default_factory=list)   # "T1", "S2", ...
+    lock_floor: float = None       # trailing lock, as a % of entry
 
     @property
     def key(self):

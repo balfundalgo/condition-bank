@@ -5,7 +5,7 @@ from core import theme as T
 from ui.widgets import Card, heading
 
 PLANNED = {
-    "Execution": [
+    "Execution_done": [
         "A screen for the strike filters the engine already reads -- option "
         "type, moneyness, allow / ignore percentage of the underlying, step "
         "factor and premium range, per strategy",
@@ -17,7 +17,7 @@ PLANNED = {
         "rule for when more strikes pass than the limit allows",
         "Limit order buffer, wait seconds, reprice attempts, maximum slippage",
     ],
-    "Targets": [
+    "Targets_done": [
         "Four targets and four stop-losses, each with rate % and quantity %",
         "Trailing lock profit, ten levels, per position",
         "Profit locking per strategy, and across all strategies combined",

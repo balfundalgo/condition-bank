@@ -27,6 +27,7 @@ from . import dhan, evaluator as EV, expression as E
 from .feed import FeedPool
 from .orders import OrderManager, OrderRequest, PRIORITY_ENTRY, PRIORITY_EXIT
 from .positions import BOOK, Position
+from . import risk as RISK
 from .series import StrikeData, tf_seconds
 from .store import LOG_DIR
 from .universe import Universe, UniverseFilter
@@ -109,6 +110,7 @@ class Engine:
         self.last_error = ""
         self.notices = deque(maxlen=50)
         self.eval_count = 0
+        self.risk = RISK.RiskState()
 
     # ───────────────────────────────────────────────────────── lifecycle
     def start(self, strategies):
@@ -185,6 +187,8 @@ class Engine:
                                  name="backfill").start()
             threading.Thread(target=self._housekeeping, daemon=True,
                              name="housekeeping").start()
+            threading.Thread(target=self._risk_loop, daemon=True,
+                             name="risk").start()
 
             self.status = "running"
             self._emit("started", {"strategies": len(self.strategies)})
@@ -223,6 +227,68 @@ class Engine:
             except Exception as e:
                 log.error("housekeeping: %s", e)
             time.sleep(5)
+
+    def _risk_loop(self):
+        """
+        Steps 1 to 6 of the precedence: the account and strategy rules.
+        They run on their own one-second clock rather than on ticks, so a
+        day limit does not wait for the next quote on some strike.
+        """
+        while self._running:
+            try:
+                self._check_portfolio_risk()
+                self._sweep_halted()
+            except Exception as e:
+                log.error("risk loop: %s", e)
+            time.sleep(1.0)
+
+    def _sweep_halted(self):
+        """
+        Once a limit has fired, anything still open is closed on every
+        pass. Orders in flight at the moment of the halt land afterwards,
+        so one sweep is not enough.
+        """
+        for strategy in self.strategies:
+            if self.risk.entries_allowed(strategy.number):
+                continue
+            for pos in self.book.for_strategy(strategy.number):
+                self._exit(strategy, pos, "day limit reached")
+
+    def _check_portfolio_risk(self):
+        settings = {}
+        try:
+            from .store import STORE
+            settings = STORE.bank.settings if STORE.bank else {}
+        except Exception:
+            pass
+
+        if not self.risk.account_halted:
+            action = RISK.check_account(self.book, settings, self.risk)
+            if action:
+                self.risk.halt(action)
+                closed = self.exit_all(reason=action.reason)
+                self._notice(f"{action.reason} — closing everything "
+                             f"({closed} position"
+                             f"{'s' if closed != 1 else ''}). No new entries "
+                             f"today.")
+                self._emit("halted", {"scope": "account",
+                                      "reason": action.reason})
+                return
+
+        for strategy in self.strategies:
+            if not self.risk.entries_allowed(strategy.number):
+                continue
+            action = RISK.check_strategy(strategy, self.book, self.risk)
+            if action:
+                self.risk.halt(action, strategy.number)
+                closed = self.exit_all(strategy.number, action.reason)
+                self._notice(f"{strategy.name}: {action.reason} — closing "
+                             f"{closed} position"
+                             f"{'s' if closed != 1 else ''}. No new entries "
+                             f"for this strategy today.")
+                self._emit("halted", {"scope": "strategy",
+                                      "strategy": strategy.name,
+                                      "reason": action.reason})
 
     def _reconcile(self):
         mismatches = self.book.reconcile(self.client.positions())
@@ -384,7 +450,12 @@ class Engine:
 
             position = self.book.open.get(key)
             if position is not None:
-                self._check_exit(strategy, position, strike)
+                action = RISK.check_position(strategy, position)
+                if action:
+                    self._exit(strategy, position, action.reason,
+                               qty=action.qty or None, level=action.level)
+                else:
+                    self._check_exit(strategy, position, strike)
                 continue
 
             if security_id not in uni.current:
@@ -397,6 +468,8 @@ class Engine:
                 self._advance_late(pending_signal, strategy, strike)
                 continue
 
+            if not self.risk.entries_allowed(strategy.number):
+                continue
             if not self._entry_window_open(strategy):
                 continue
             if self._at_capacity(strategy):
@@ -501,6 +574,14 @@ class Engine:
                 entry_at=datetime.now().strftime("%H:%M:%S"),
                 lot_size=lot, ltp=fill_price))
             self._emit("signal", signal.describe())
+            # The order was already at the broker when a limit fired, so
+            # the position is real and has to be closed rather than
+            # forgotten about.
+            if not self.risk.entries_allowed(strategy.number):
+                position = self.book.open.get(key)
+                if position is not None:
+                    self._exit(strategy, position,
+                               "filled after the day limit fired")
 
         accepted, message = self.orders.submit(OrderRequest(
             strategy_number=strategy.number, strategy_name=strategy.name,
@@ -520,7 +601,7 @@ class Engine:
         if EV.evaluate_expression(strategy.exit, ctx, strategy) is True:
             self._exit(strategy, position, "exit condition")
 
-    def _exit(self, strategy, position, reason, qty=None):
+    def _exit(self, strategy, position, reason, qty=None, level=""):
         key = (strategy.number, position.security_id)
         if key in self.pending:
             return
@@ -528,11 +609,18 @@ class Engine:
         if qty <= 0:
             return
         self.pending.add(key)
+        # Mark the level now so a repeated tick cannot fire it twice while
+        # the order is in flight. If the order fails, it is unmarked below
+        # so the level can try again.
+        if level and level not in position.levels_hit:
+            position.levels_hit.append(level)
         price = position.ltp or position.entry_price
 
         def done(ok, fill_price, fill_qty, order_id):
             self.pending.discard(key)
             if not ok:
+                if level and level in position.levels_hit:
+                    position.levels_hit.remove(level)
                 # The position is still open. It stays in the book and in
                 # the error basket so it cannot be quietly forgotten.
                 self._notice(f"{position.label}: exit failed and the "
@@ -589,6 +677,9 @@ class Engine:
             "orders": self.orders.stats(),
             "positions": self.book.totals(),
             "mismatches": list(self.book.mismatches),
+            "halted": sorted(self.risk.halted),
+            "account_halted": self.risk.account_halted,
+            "halt_reasons": list(self.risk.reasons),
             "universes": [u.describe() for u in self.universes.values()],
         }
 

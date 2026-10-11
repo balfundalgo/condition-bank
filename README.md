@@ -32,8 +32,14 @@ Built from the specification **The Condition Bank v1.0**.
 | Broker reconciliation (the broker is always the truth) | Working |
 | Charges per trade — brokerage, STT, exchange, SEBI, stamp duty, GST | Working, rates editable |
 | Exit on exit conditions, square-off time, manual Exit all | Working |
-| Targets, stops, trailing, profit locks, day limits | Phase 4 |
-| Execution screen, Copy trade, Security | Later phases |
+| Targets and stop-losses, four levels each, partial exits | Working |
+| Trailing lock profit, ten levels, per position | Working |
+| Profit lock per strategy and across all strategies | Working |
+| Day profit / day loss, per strategy and combined | Working |
+| Eleven-step exit precedence | Working |
+| Execution screen — strike filters, sizing, timing, caps | Working |
+| Targets screen — all of the above, per strategy | Working |
+| Copy trade, Security | Later phases |
 
 The data engine and the order path are both live. A strategy in **Paper**
 mode fills instantly at the signal price and touches no broker API; a
@@ -51,9 +57,15 @@ duty and GST, and the rates are editable on the dashboard — they change
 with budgets and exchange circulars, so check them against a real contract
 note before trusting the net figure.
 
-Targets, stop-losses, trailing locks and the profit-lock layers are not in
-yet. What closes a position today is an exit condition, the square-off
-time, or the Exit all button.
+A position can be closed by a target, a stop-loss, the trailing lock, a
+profit lock, a day limit, an exit condition, the square-off time, or the
+Exit all button — resolved in the eleven-step order from Section 8 of the
+specification. Account-level rules outrank strategy-level ones, which
+outrank anything managing a single trade.
+
+Day limits and profit locks work on NET profit after charges. Targets,
+stops and the trailing lock work on the premium, because that is what the
+user typed a percentage of.
 
 ---
 
@@ -93,6 +105,7 @@ condition-bank/
 │   ├── feed.py                 WebSocket pool, 5 x 5,000 instruments
 │   ├── universe.py             expiry rule and the live strike band
 │   ├── charges.py              brokerage, STT, exchange, SEBI, stamp, GST
+│   ├── risk.py                 targets, stops, trailing, locks, day limits
 │   ├── orders.py               priority queue, retries, error basket
 │   ├── positions.py            position book, MTM, state, reconciliation
 │   ├── engine.py               orchestrator
@@ -106,6 +119,8 @@ condition-bank/
 │       ├── strategy_builder.py
 │       ├── brokers.py
 │       ├── engine_page.py
+│       ├── execution.py
+│       ├── targets.py
 │       └── placeholder.py
 └── .github/workflows/build.yml
 ```
