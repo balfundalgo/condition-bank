@@ -1,0 +1,24 @@
+# secrets and local state
+.env
+condition_bank.json
+condition_bank.json.bad
+*.bak
+
+# logs
+logs/
+*.log
+
+# python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# build
+build/
+dist/
+*.spec
+
+# os
+.DS_Store
+Thumbs.db
